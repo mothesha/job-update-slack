@@ -1,0 +1,44 @@
+name: Daily DV job search
+on:
+  schedule:
+    - cron: "15 13 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Search without notifying Slack
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: daily-dv-job-search
+  cancel-in-progress: false
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Search and notify
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            python -m job_alert --dry-run
+          else
+            python -m job_alert
+          fi
+      - name: Persist notification history
+        if: ${{ success() && inputs.dry_run != true }}
+        run: |
+          if git diff --quiet -- data/state.json; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/state.json
+          git commit -m "chore: update notified job history"
+          git push
